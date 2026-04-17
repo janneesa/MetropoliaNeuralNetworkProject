@@ -1,0 +1,12 @@
+1. “Moi! Tämä on lyhyt testinauhoitus Whisper-mallille. Tänään on 17. huhtikuuta 2026, ja testaan puheentunnistusta omalla tietokoneellani.
+Jos kuulet tämän selkeästi, järjestelmä toimii hyvin. Kiitos!”
+
+2. “Tämä on Whisper-testinauhoitus. Nimeni on Mikael Nieminen ja lähetän terveisiä Helsingistä. Tänään on 17.4.2026, kello 14.37. Osoite on Mannerheimintie 10 A 3, ja
+puhelinnumero alkaa nollalla neljällä nolla, yksi kaksi kolme, neljä viisi kuusi.”
+
+3. “Öö joo, siis tavallaan niinku, mä olin menossa, mut sit tuli se yks juttu, ja no, tiiäks, se meni vähän silleen et ‘äh, en mä nyt’.
+Ja sit mä pyörin siinä ja mietin et okei, mitä seuraavaks, ja lopulta se vaan ratkes.”
+
+(Tahallista muminaa ja taukoa lauseiden välissä)
+4.“Eilen mä olin sillee et joo, terde vois olla jees, mut sit… muh tuli se yks tyyppi ja se alko höpöttää jotain… mm-mm ‘budjetti’ ja ‘aikataulu’
+ja mä olin vaan et jep, jep… en kuunnellu oikeen.”
