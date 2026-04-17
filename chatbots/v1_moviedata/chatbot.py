@@ -23,7 +23,8 @@ sp.load_from_serialized_proto(sp_model_bytes)
 print(f"  Vocabulary size: {sp.get_piece_size()}")
 
 print("Loading model (this may take a moment)...")
-model = keras.models.load_model('chatbot_best_v1.keras')
+# Load model from separate files (config, weights, metadata)
+model = keras.models.load_model('chatbot_model_v1.keras_FILES')
 print("  Ready.\n")
 
 # ── Helper functions ───────────────────────────────────────────────────────────
