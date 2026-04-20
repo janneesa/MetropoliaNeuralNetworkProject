@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from collections import Counter
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -22,9 +23,14 @@ MAX_SEQ_LEN = 256
 MAX_CONTEXT_TURNS = 4
 
 GEN_MAX_NEW_TOKENS = 80
-TEMPERATURE = 0.8
+TEMPERATURE = 0.7
 TOP_K = 40
 SEED = 42
+REPETITION_PENALTY = 1.15
+FREQUENCY_PENALTY = 0.08
+RECENT_TOKEN_PENALTY = 0.12
+RECENT_TOKEN_WINDOW = 12
+NO_REPEAT_NGRAM_SIZE = 3
 
 mixed_precision.set_global_policy("float32")
 
@@ -251,13 +257,64 @@ def load_chat_model(model_path: Path):
 # GENERATION
 # ============================================================================
 
-def sample_next_token(logits: np.ndarray, temperature: float, top_k: int) -> int:
-    logits = logits.astype(np.float64)
+def apply_repetition_controls(logits: np.ndarray, reply_tokens: list[int]) -> np.ndarray:
+    adjusted = logits.astype(np.float64).copy()
 
     banned_ids = {PAD_ID, USER_ID, ASSISTANT_ID}
     for banned_id in banned_ids:
-        if 0 <= banned_id < len(logits):
-            logits[banned_id] = -1e10
+        if 0 <= banned_id < len(adjusted):
+            adjusted[banned_id] = -1e10
+
+    if not reply_tokens:
+        return adjusted
+
+    if REPETITION_PENALTY and REPETITION_PENALTY > 1.0:
+        for token_id in set(reply_tokens):
+            if 0 <= token_id < len(adjusted):
+                if adjusted[token_id] >= 0:
+                    adjusted[token_id] /= REPETITION_PENALTY
+                else:
+                    adjusted[token_id] *= REPETITION_PENALTY
+
+    if FREQUENCY_PENALTY and FREQUENCY_PENALTY > 0:
+        for token_id, count in Counter(reply_tokens).items():
+            if 0 <= token_id < len(adjusted):
+                adjusted[token_id] -= FREQUENCY_PENALTY * count
+
+    if RECENT_TOKEN_PENALTY and RECENT_TOKEN_PENALTY > 0 and RECENT_TOKEN_WINDOW > 0:
+        for token_id in reply_tokens[-RECENT_TOKEN_WINDOW:]:
+            if 0 <= token_id < len(adjusted):
+                adjusted[token_id] -= RECENT_TOKEN_PENALTY
+
+    blocked_tokens = get_blocked_ngram_tokens(reply_tokens, NO_REPEAT_NGRAM_SIZE)
+    for token_id in blocked_tokens:
+        if 0 <= token_id < len(adjusted):
+            adjusted[token_id] = -1e10
+
+    return adjusted
+
+
+def get_blocked_ngram_tokens(reply_tokens: list[int], ngram_size: int) -> set[int]:
+    if ngram_size is None or ngram_size < 2:
+        return set()
+
+    prefix_len = ngram_size - 1
+    if len(reply_tokens) < prefix_len:
+        return set()
+
+    prefix = tuple(reply_tokens[-prefix_len:])
+    blocked = set()
+
+    for start in range(len(reply_tokens) - ngram_size + 1):
+        ngram = reply_tokens[start:start + ngram_size]
+        if tuple(ngram[:-1]) == prefix:
+            blocked.add(ngram[-1])
+
+    return blocked
+
+
+def sample_next_token(logits: np.ndarray, reply_tokens: list[int], temperature: float, top_k: int) -> int:
+    logits = apply_repetition_controls(logits, reply_tokens)
 
     if temperature is None or temperature <= 0:
         return int(np.argmax(logits))
@@ -306,6 +363,7 @@ def generate_reply(model, conversation_turns: list[str]) -> str:
 
         next_id = sample_next_token(
             next_logits,
+            reply_tokens=new_tokens,
             temperature=TEMPERATURE,
             top_k=TOP_K,
         )
