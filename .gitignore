@@ -3,3 +3,28 @@
 # Local model artifacts (too large for GitHub)
 chatbots/v1_moviedata/chatbot_model_v1.keras
 chatbots/v1_moviedata/chatbot_sp_v1.model
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.env
+
