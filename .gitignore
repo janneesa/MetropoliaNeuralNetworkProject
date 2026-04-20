@@ -1,4 +1,7 @@
 .idea
+.codex
+*.keras
+*.model
 
 # Local model artifacts (too large for GitHub)
 chatbots/v1_moviedata/chatbot_model_v1.keras
