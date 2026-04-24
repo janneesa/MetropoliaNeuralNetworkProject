@@ -6,7 +6,7 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function MessageList({ messages, isSending, bottomRef }) {
+export default function MessageList({ messages, isSending, isStreamingResponse, bottomRef, assistantName }) {
   const messagesRef = useRef();
 
   const scrollToBottom = () => {
@@ -59,10 +59,10 @@ export default function MessageList({ messages, isSending, bottomRef }) {
         </div>
       ))}
 
-      {isSending ? (
+      {isSending && !isStreamingResponse ? (
         <div className="messageRow isAssistant">
           <div className="bubble">
-            <div className="bubbleRole">Willow</div>
+            <div className="bubbleRole">{assistantName}</div>
             <div className="bubbleContent">
               Thinking<span className="thinkingDots" aria-live="polite">
                 <span>.</span><span>.</span><span>.</span>

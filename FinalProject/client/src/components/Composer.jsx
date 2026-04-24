@@ -1,5 +1,3 @@
-import { useState } from 'react';
-
 // Simple modern composer
 export default function Composer({ prompt, setPrompt, onSubmit, onComposerKeyDown, isSending, error, onOpenParams }) {
   return (

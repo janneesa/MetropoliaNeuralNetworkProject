@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import './App.css'
 import './animations.css'
-import ChatHeader from './components/ChatHeader'
 import MessageList from './components/MessageList'
 import Composer from './components/Composer'
 import ModelParamsPanel from './components/ModelParamsPanel'
@@ -27,41 +26,337 @@ function extractAnswer(data) {
 }
 
 function createId() {
-  return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
 }
 
-function normalizeBaseUrl(url) {
-  return url.endsWith('/') ? url.slice(0, -1) : url
-}
+function deriveSettingsEndpoint(chatEndpoint) {
+  if (!chatEndpoint || chatEndpoint === '/api/chat') return '/api/settings'
 
-function looksLikeBaseUrl(url) {
   try {
-    const u = new URL(url)
-    return u.pathname === '' || u.pathname === '/'
+    const url = new URL(chatEndpoint, window.location.origin)
+    url.pathname = url.pathname.replace(/\/api\/chat$/, '/api/settings')
+    return chatEndpoint.startsWith('http') ? url.toString() : `${url.pathname}${url.search}`
   } catch {
-    return false
+    return '/api/settings'
   }
 }
 
-function App() {
+function normalizeSettings(data) {
+  const temperature = Number(data?.temperature ?? 0.5)
+  const maxTokens = Number(data?.max_tokens ?? data?.response_length ?? 80)
+  const stream = typeof data?.stream === 'boolean' ? data.stream : true
+
+  return {
+    temperature: Number.isFinite(temperature) ? temperature : 0.5,
+    maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 80,
+    stream,
+  }
+}
+
+function sameSettings(a, b) {
+  if (!a || !b) return false
+  return (
+    a.temperature === b.temperature &&
+    a.maxTokens === b.maxTokens &&
+    a.stream === b.stream
+  )
+}
+
+function extractModelLabel(data) {
+  const label = data?.model?.label ?? data?.settings?.model?.label
+  return typeof label === 'string' && label.trim() ? label : 'Emma'
+}
+
+async function readResponseBody(res) {
+  const contentType = res.headers.get('content-type') || ''
+  return contentType.includes('application/json') ? res.json() : res.text()
+}
+
+export default function App() {
   const endpoint = useMemo(
     () => import.meta.env.VITE_CHAT_ENDPOINT || '/api/chat',
     [],
   )
 
-  const provider = useMemo(
-    () => (import.meta.env.VITE_CHAT_PROVIDER || 'generic').toLowerCase(),
-    [],
+  const settingsEndpoint = useMemo(
+    () => import.meta.env.VITE_SETTINGS_ENDPOINT || deriveSettingsEndpoint(endpoint),
+    [endpoint],
   )
-  const ollamaModel = useMemo(() => import.meta.env.VITE_OLLAMA_MODEL || '', [])
 
   const [messages, setMessages] = useState([])
   const [prompt, setPrompt] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [isStreamingResponse, setIsStreamingResponse] = useState(false)
   const [error, setError] = useState('')
   const bottomRef = useRef(null)
   const [paramsOpen, setParamsOpen] = useState(false)
-  const [modelParams, setModelParams] = useState({ temperature: 1, maxTokens: 1024 })
+  const [assistantName, setAssistantName] = useState('Emma')
+  const [modelParams, setModelParams] = useState({ temperature: 0.5, maxTokens: 80, stream: true })
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const lastSyncedSettingsRef = useRef({ temperature: 0.5, maxTokens: 80, stream: true })
+
+  function syncServerState(data) {
+    if (typeof data !== 'object' || data === null) {
+      return
+    }
+
+    const hasSettingsPayload = (
+      data.settings != null ||
+      'temperature' in data ||
+      'max_tokens' in data ||
+      'response_length' in data ||
+      'stream' in data
+    )
+
+    if (hasSettingsPayload) {
+      const nextSettings = normalizeSettings(data.settings ?? data)
+      lastSyncedSettingsRef.current = nextSettings
+      setModelParams((prev) => (sameSettings(prev, nextSettings) ? prev : nextSettings))
+    }
+
+    setAssistantName(extractModelLabel(data))
+  }
+
+  useEffect(() => {
+    let isDisposed = false
+
+    async function loadSettings() {
+      try {
+        const res = await fetch(settingsEndpoint)
+        const data = await readResponseBody(res)
+
+        if (!res.ok) {
+          throw new Error(data?.error || data?.message || `Request failed (${res.status})`)
+        }
+
+        const nextSettings = normalizeSettings(data)
+        if (isDisposed) return
+
+        lastSyncedSettingsRef.current = nextSettings
+        setModelParams(nextSettings)
+        setAssistantName(extractModelLabel(data))
+        setError('')
+      } catch (e) {
+        if (isDisposed) return
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (!isDisposed) {
+          setSettingsLoaded(true)
+        }
+      }
+    }
+
+    void loadSettings()
+
+    return () => {
+      isDisposed = true
+    }
+  }, [settingsEndpoint])
+
+  useEffect(() => {
+    if (!settingsLoaded || sameSettings(modelParams, lastSyncedSettingsRef.current)) {
+      return undefined
+    }
+
+    const abortController = new AbortController()
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const res = await fetch(settingsEndpoint, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            temperature: modelParams.temperature,
+            max_tokens: modelParams.maxTokens,
+            stream: modelParams.stream,
+          }),
+          signal: abortController.signal,
+        })
+
+        const data = await readResponseBody(res)
+        if (!res.ok) {
+          throw new Error(data?.error || data?.message || `Request failed (${res.status})`)
+        }
+
+        syncServerState(data)
+        setError('')
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') {
+          return
+        }
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    }, 150)
+
+    return () => {
+      abortController.abort()
+      window.clearTimeout(timeoutId)
+    }
+  }, [modelParams, settingsEndpoint, settingsLoaded])
+
+  async function sendStandardPrompt(body) {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    const data = await readResponseBody(res)
+    if (!res.ok) {
+      const msg =
+        (typeof data === 'string' ? data : data?.error || data?.message) ||
+        `Request failed (${res.status})`
+      throw new Error(msg)
+    }
+
+    syncServerState(data)
+
+    if (data?.reset) {
+      setMessages([])
+      return
+    }
+
+    const answer = extractAnswer(data) || (typeof data === 'string' ? data : '')
+    const assistantMessage = {
+      id: createId(),
+      role: extractModelLabel(data),
+      content: answer || '(No answer returned)',
+      timestamp: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, assistantMessage])
+  }
+
+  async function sendStreamingPrompt(body) {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const data = await readResponseBody(res)
+      const msg =
+        (typeof data === 'string' ? data : data?.error || data?.message) ||
+        `Request failed (${res.status})`
+      throw new Error(msg)
+    }
+
+    const reader = res.body?.getReader()
+    if (!reader) {
+      throw new Error('Streaming response is not available in this browser.')
+    }
+
+    const decoder = new TextDecoder()
+    const assistantMessageId = createId()
+    let buffer = ''
+    let streamedText = ''
+    let hasAssistantMessage = false
+    let currentAssistantRole = assistantName
+
+    const setAssistantMessage = (content) => {
+      if (!hasAssistantMessage) {
+        hasAssistantMessage = true
+        setIsStreamingResponse(true)
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantMessageId,
+            role: currentAssistantRole,
+            content,
+            timestamp: new Date().toISOString(),
+          },
+        ])
+        return
+      }
+
+      setMessages((prev) => prev.map((message) => (
+        message.id === assistantMessageId
+          ? { ...message, role: currentAssistantRole, content }
+          : message
+      )))
+    }
+
+    const processEvent = (event) => {
+      if (typeof event !== 'object' || event === null) {
+        return
+      }
+
+      syncServerState(event)
+      currentAssistantRole = extractModelLabel(event)
+      setAssistantName(currentAssistantRole)
+
+      if (hasAssistantMessage) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === assistantMessageId
+            ? { ...message, role: currentAssistantRole }
+            : message
+        )))
+      }
+
+      if (event.type === 'start') {
+        return
+      }
+
+      if (event.type === 'chunk') {
+        const text = typeof event.text === 'string' ? event.text : ''
+        if (!text) {
+          return
+        }
+        streamedText += text
+        setAssistantMessage(streamedText)
+        return
+      }
+
+      if (event.type === 'reset') {
+        setMessages([])
+        return
+      }
+
+      if (event.type === 'done') {
+        const finalText = typeof event.response === 'string' ? event.response : streamedText
+        if (event.reset) {
+          setMessages([])
+          return
+        }
+        setAssistantMessage(finalText || '(No answer returned)')
+        return
+      }
+
+      if (event.type === 'error') {
+        throw new Error(event.error || 'Streaming failed.')
+      }
+
+      const fallbackText = extractAnswer(event)
+      if (fallbackText) {
+        streamedText = fallbackText
+        setAssistantMessage(fallbackText)
+      }
+    }
+
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (!trimmedLine) {
+          continue
+        }
+        processEvent(JSON.parse(trimmedLine))
+      }
+
+      if (done) {
+        break
+      }
+    }
+
+    const trailingLine = buffer.trim()
+    if (trailingLine) {
+      processEvent(JSON.parse(trailingLine))
+    }
+  }
 
   async function sendPrompt(userPrompt) {
     const trimmed = userPrompt.trim()
@@ -69,84 +364,40 @@ function App() {
 
     setError('')
     setIsSending(true)
+    setIsStreamingResponse(false)
 
     const userMessage = { id: createId(), role: 'user', content: trimmed, timestamp: new Date().toISOString() }
-    const nextMessages = [...messages, userMessage]
-    setMessages(nextMessages)
+    const requestSettings = { ...modelParams }
+
+    setMessages((prev) => [...prev, userMessage])
     setPrompt('')
 
+    const requestBody = {
+      prompt: trimmed,
+      temperature: requestSettings.temperature,
+      max_tokens: requestSettings.maxTokens,
+      stream: requestSettings.stream,
+    }
+
     try {
-      let url = endpoint
-      let body = { prompt: trimmed, temperature: modelParams.temperature, max_tokens: modelParams.maxTokens }
-
-      if (provider === 'ollama') {
-        if (!ollamaModel) {
-          throw new Error(
-            'Missing VITE_OLLAMA_MODEL. Set it in .env (e.g. llama3.2, mistral, etc.)',
-          )
-        }
-
-        if (looksLikeBaseUrl(endpoint)) {
-          url = `${normalizeBaseUrl(endpoint)}/api/generate`
-        }
-
-        if (url.endsWith('/api/chat')) {
-          body = {
-            model: ollamaModel,
-            messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
-            stream: false,
-            temperature: modelParams.temperature,
-            max_tokens: modelParams.maxTokens,
-          }
-        } else {
-          body = {
-            model: ollamaModel,
-            prompt: trimmed,
-            stream: false,
-            temperature: modelParams.temperature,
-            max_tokens: modelParams.maxTokens,
-          }
-        }
+      if (requestSettings.stream) {
+        await sendStreamingPrompt(requestBody)
+      } else {
+        await sendStandardPrompt(requestBody)
       }
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      const contentType = res.headers.get('content-type') || ''
-      const data = contentType.includes('application/json')
-        ? await res.json()
-        : await res.text()
-
-      if (!res.ok) {
-        const msg =
-          (typeof data === 'string' ? data : data?.error || data?.message) ||
-          `Request failed (${res.status})`
-        throw new Error(msg)
-      }
-
-      const answer = extractAnswer(data) || (typeof data === 'string' ? data : '')
-      const assistantMessage = {
-        id: createId(),
-        role: 'Willow',
-        content: answer || '(No answer returned)',
-        timestamp: new Date().toISOString(),
-      }
-      setMessages((prev) => [...prev, assistantMessage])
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setMessages((prev) => [
         ...prev,
         {
           id: createId(),
-          role: 'Willow',
+          role: assistantName,
           content: 'Sorry — something went wrong sending that message.',
           timestamp: new Date().toISOString(),
         },
       ])
     } finally {
+      setIsStreamingResponse(false)
       setIsSending(false)
     }
   }
@@ -167,7 +418,13 @@ function App() {
     <div className="app">
       <main className="chat" aria-label="Chat">
         <div className="chatbox-area">
-          <MessageList messages={messages} isSending={isSending} bottomRef={bottomRef} />
+          <MessageList
+            messages={messages}
+            isSending={isSending}
+            isStreamingResponse={isStreamingResponse}
+            bottomRef={bottomRef}
+            assistantName={assistantName}
+          />
         </div>
         <div className="composer-area">
           <Composer
@@ -190,5 +447,3 @@ function App() {
     </div>
   )
 }
-
-export default App

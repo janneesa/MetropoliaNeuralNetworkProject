@@ -1,37 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import './ModelParamsPanel.css';
-
-const tempExamples = [
-  {
-    low: 'The cat sat on the mat.',
-    high: 'A turquoise feline pirouetted atop a velvet rug, pondering quantum dreams.'
-  },
-  {
-    low: 'It is raining today.',
-    high: 'Raindrops waltz from the sky, painting the city in shimmering silver.'
-  },
-  {
-    low: 'I like pizza.',
-    high: 'Pizza is a cosmic wheel of molten joy and infinite possibility!'
-  },
-  {
-    low: 'The dog barked.',
-    high: 'A boisterous hound serenaded the moon with operatic barks.'
-  },
-  {
-    low: 'She opened the door.',
-    high: 'With a flourish, she unveiled new worlds behind the ancient door.'
-  }
-];
-
-function getTempExample(temp) {
-  const idx = Math.floor(temp * (tempExamples.length - 1) / 2);
-  const ex = tempExamples[idx];
-  if (temp < 0.7) return ex.low;
-  if (temp > 1.3) return ex.high;
-  // Blend
-  return `${ex.low.slice(0, Math.floor(ex.low.length/2))}...${ex.high.slice(Math.floor(ex.high.length/2))}`;
-}
 
 export default function ModelParamsPanel({ open, onClose, params, setParams }) {
   const [visible, setVisible] = useState(open);
@@ -66,6 +34,15 @@ export default function ModelParamsPanel({ open, onClose, params, setParams }) {
         </div>
         <div className="paramsDivider" />
         <div className="paramsBody">
+          <label className="paramToggleRow">
+            <span>Stream Response</span>
+            <input
+              type="checkbox"
+              checked={Boolean(params.stream)}
+              onChange={e => setParams(p => ({ ...p, stream: e.target.checked }))}
+              className="paramCheckbox"
+            />
+          </label>
           <label className="paramLabel">
             Temperature
             <div className="paramSliderRow">
@@ -82,7 +59,7 @@ export default function ModelParamsPanel({ open, onClose, params, setParams }) {
             </div>
           </label>
           <label className="paramLabel">
-            Max Tokens
+            Response Length
             <input
               type="number"
               min="1"

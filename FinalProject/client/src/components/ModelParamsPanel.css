@@ -122,6 +122,21 @@
   gap: 12px;
 }
 
+.paramToggleRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.paramCheckbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .paramSlider {
   width: 100%;
   accent-color: var(--accent);
