@@ -275,27 +275,6 @@ class WarmupCosineDecay(keras.optimizers.schedules.LearningRateSchedule):
         }
 
 
-def build_chatbot_model(vocab_size: int, max_seq_len: int) -> keras.Model:
-    input_ids = keras.Input(shape=(max_seq_len,), dtype="int32", name="input_ids")
-    padding_mask = keras.ops.cast(keras.ops.not_equal(input_ids, PAD_ID), "float32")
-
-    x = TokenAndPositionEmbedding(vocab_size, max_seq_len, MODEL_D_MODEL, name="embed")(input_ids)
-    x = keras.layers.Dropout(MODEL_DROPOUT)(x)
-
-    for block_index in range(MODEL_NUM_LAYERS):
-        x = TransformerBlock(
-            d_model=MODEL_D_MODEL,
-            num_heads=MODEL_NUM_HEADS,
-            ff_dim=MODEL_FF_DIM,
-            dropout=MODEL_DROPOUT,
-            name=f"transformer_block_{block_index}",
-        )(x, padding_mask=padding_mask)
-
-    x = keras.layers.LayerNormalization(epsilon=1e-5, name="final_layer_norm")(x)
-    logits = keras.layers.Dense(vocab_size, dtype="float32", name="lm_head")(x)
-    return keras.Model(inputs=input_ids, outputs=logits, name=CHATBOT_SLUG)
-
-
 CUSTOM_OBJECTS = {
     "TokenAndPositionEmbedding": TokenAndPositionEmbedding,
     "TransformerBlock": TransformerBlock,
@@ -454,11 +433,11 @@ def load_chat_model(model_path: Path, verbose: bool = False) -> keras.Model:
         )
     except Exception as error:
         if verbose:
-            print(f"Full load failed ({type(error).__name__}): {error}")
-            print("Falling back to build_chatbot_model(...) + load_weights(...)")
-        model = build_chatbot_model(VOCAB_SIZE, MODEL_MAX_SEQ_LEN)
-        model.load_weights(str(model_path))
-        return model
+            print(f"Model load failed ({type(error).__name__}): {error}")
+        raise RuntimeError(
+            f"Failed to load model '{model_path}' as a full .keras model. "
+            "Please provide a compatible full-model artifact."
+        ) from error
 
 
 # ============================================================================
